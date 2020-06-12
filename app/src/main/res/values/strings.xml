@@ -2339,6 +2339,10 @@
 
     <string name="GroupRecipientListItem_admin">Admin</string>
 
+    <!-- AudioPlayerService -->
+    <string name="AudioPlayerService_notification_title">Playing</string>
+    <string name="AudioPlayerService_notification_message">Playing back a voice memo</string>
+
     <!-- EOF -->
 
 </resources>
