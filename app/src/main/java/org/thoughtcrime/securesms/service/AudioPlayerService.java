@@ -32,14 +32,19 @@ import org.thoughtcrime.securesms.notifications.NotificationChannels;
 import org.thoughtcrime.securesms.video.exo.AttachmentDataSourceFactory;
 
 public class AudioPlayerService extends Service {
-  private static final String TAG = AudioPlayerService.class.getSimpleName();
-  private static final int    FOREGROUND_ID = 313499;
+  private static final String TAG             = AudioPlayerService.class.getSimpleName();
+  private static final int    FOREGROUND_ID   = 313499;
+  public  static final String MEDIA_URI_EXTRA = "AudioPlayerService_media_uri_extra";
+  public  static final String PROGRESS_EXTRA  = "AudioPlayerService_progress_extra";
+  public  static final String EARPIECE_EXTRA  = "AudioPlayerService_earpiece_extra";
 
   private final     LocalBinder          binder = new LocalBinder();
   private final     ProgressEventHandler progressEventHandler = new ProgressEventHandler(this);
   private @Nullable SimpleExoPlayer      mediaPlayer;
 
-  private           double               initialProgress;
+  private           Uri                  mediaUri;
+  private           double               progress;
+  private           boolean              earpiece;
   private final     Player.EventListener eventListener = new Player.EventListener() {
 
     boolean started = false;
@@ -60,8 +65,8 @@ public class AudioPlayerService extends Service {
 
 //            started = true;
 
-            if (initialProgress > 0) {
-              mediaPlayer.seekTo((long) (mediaPlayer.getDuration() * initialProgress));
+            if (progress > 0) {
+              mediaPlayer.seekTo((long) (mediaPlayer.getDuration() * progress));
             }
 
 //              sensorManager.registerListener(AudioPlayerService.this, proximitySensor, SensorManager.SENSOR_DELAY_NORMAL);
@@ -132,7 +137,20 @@ public class AudioPlayerService extends Service {
   @Nullable
   @Override
   public IBinder onBind(Intent intent) {
+    mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
+    progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
+    earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
+    play();
     return binder;
+  }
+
+  @Override
+  public boolean onUnbind(Intent intent) {
+    stop();
+    mediaUri = null;
+    progress = 0;
+    earpiece = false;
+    return true;
   }
 
   private Notification createNotification() {
@@ -145,11 +163,8 @@ public class AudioPlayerService extends Service {
     return builder.build();
   }
 
-  private void play(Uri uri, double progress, boolean earpiece, AudioStateListener listener) {
-    initialProgress = progress;
-    stop();
-
-    binder.setListener(listener);
+  private void play() {
+    if (mediaUri == null) return;
     LoadControl loadControl = new DefaultLoadControl
         .Builder()
         .setBufferDurationsMs(Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE)
@@ -166,7 +181,7 @@ public class AudioPlayerService extends Service {
         new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
     ExtractorMediaSource mediaSource = new ExtractorMediaSource.Factory(attachmentDataSourceFactory)
         .setExtractorsFactory(extractorsFactory)
-        .createMediaSource(uri);
+        .createMediaSource(mediaUri);
     mediaPlayer.prepare(mediaSource);
     mediaPlayer.setPlayWhenReady(true);
     mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
@@ -180,11 +195,8 @@ public class AudioPlayerService extends Service {
     mediaPlayer.stop();
     mediaPlayer.release();
     mediaPlayer = null;
-    initialProgress = 0;
 
 //    sensorManager.unregisterListener(AudioPlayerService.this);
-
-    binder.notifyOnStop();
   }
 
   private Pair<Double, Integer> getProgress() {
@@ -201,14 +213,6 @@ public class AudioPlayerService extends Service {
 
     public AudioPlayerService getService() {
       return AudioPlayerService.this;
-    }
-
-    public void play(Uri uri, double progress, boolean earpiece, AudioStateListener listener) {
-      AudioPlayerService.this.play(uri, progress, earpiece, listener);
-    }
-
-    public void stop() {
-      AudioPlayerService.this.stop();
     }
 
     private void notifyOnStart() {
@@ -231,7 +235,7 @@ public class AudioPlayerService extends Service {
       listener.onAudioProgress(progress, millis);
     }
 
-    private void setListener(AudioStateListener listener) {
+    public void setListener(AudioStateListener listener) {
       this.listener = listener;
     }
   }

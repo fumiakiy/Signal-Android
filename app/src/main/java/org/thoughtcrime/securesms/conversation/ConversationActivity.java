@@ -512,7 +512,6 @@ public class ConversationActivity extends PassphraseRequiredActionBarActivity
 
     fragment.setLastSeen(System.currentTimeMillis());
     markLastSeen();
-    AudioSlidePlayer.stopAll();
     EventBus.getDefault().unregister(this);
   }
 
