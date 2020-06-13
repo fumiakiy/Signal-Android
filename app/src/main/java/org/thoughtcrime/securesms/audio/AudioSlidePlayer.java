@@ -116,8 +116,8 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
   }
 
   private void play(final double progress, boolean earpiece) throws IOException {
-    startService(progress, earpiece);
     setPlaying(AudioSlidePlayer.this);
+    startService(progress, earpiece);
   }
 
   public synchronized void stop() {
