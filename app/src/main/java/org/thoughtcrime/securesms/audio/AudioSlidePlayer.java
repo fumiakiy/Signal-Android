@@ -5,20 +5,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioManager;
-import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Message;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import android.util.Pair;
 import android.widget.Toast;
 
 import com.google.android.exoplayer2.ExoPlaybackException;
@@ -28,7 +22,6 @@ import org.thoughtcrime.securesms.mms.AudioSlide;
 import org.thoughtcrime.securesms.service.AudioPlayerService;
 import org.thoughtcrime.securesms.util.ServiceUtil;
 import org.thoughtcrime.securesms.util.Util;
-import org.thoughtcrime.securesms.video.exo.AttachmentDataSourceFactory;
 import org.whispersystems.libsignal.util.guava.Optional;
 
 import java.io.IOException;
@@ -95,27 +88,30 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
   }
 
   private void startService(final double progress, final boolean earpiece) {
-    context.startService(serviceIntent);
     serviceIntent.putExtra(AudioPlayerService.MEDIA_URI_EXTRA, slide.getUri());
     serviceIntent.putExtra(AudioPlayerService.PROGRESS_EXTRA, progress);
     serviceIntent.putExtra(AudioPlayerService.EARPIECE_EXTRA, earpiece);
+    Log.d(TAG, slide.getUri().toString());
+    context.startService(serviceIntent);
+    bindService();
+  }
+
+  private void bindService() {
     context.bindService(serviceIntent, serviceConnection, 0);
   }
 
-  private void stopService() {
+  private void unbindService() {
     if (binder != null) {
       context.unbindService(serviceConnection);
+      binder = null;
     }
-//    if (!playing.isPresent()) {
-//      context.stopService(serviceIntent);
-//    }
   }
 
   public void play(final double progress) throws IOException {
     play(progress, false);
   }
 
-  private void play(final double progress, boolean earpiece) throws IOException {
+  private void play(final double progress, boolean earpiece) {
     setPlaying(AudioSlidePlayer.this);
     startService(progress, earpiece);
   }
@@ -124,7 +120,21 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
     Log.i(TAG, "Stop called!");
 
     removePlaying(this);
-    stopService();
+    if (binder != null) {
+      binder.stop();
+    }
+  }
+
+  public static void onResume() {
+    if (!playing.isPresent()) return;
+    AudioSlidePlayer player = playing.get();
+    player.bindService();
+  }
+
+  public static void onPause() {
+    if (!playing.isPresent()) return;
+    AudioSlidePlayer player = playing.get();
+    player.unbindService();
   }
 
   @Override
@@ -134,6 +144,7 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
 
   @Override
   public void onAudioStopped() {
+    unbindService();
     notifyOnStop();
   }
 

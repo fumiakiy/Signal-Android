@@ -34,12 +34,21 @@ import org.thoughtcrime.securesms.video.exo.AttachmentDataSourceFactory;
 public class AudioPlayerService extends Service {
   private static final String TAG             = AudioPlayerService.class.getSimpleName();
   private static final int    FOREGROUND_ID   = 313499;
+  private static final int    IDLE_STOP_MS    = 60 * 1000;
   public  static final String MEDIA_URI_EXTRA = "AudioPlayerService_media_uri_extra";
   public  static final String PROGRESS_EXTRA  = "AudioPlayerService_progress_extra";
   public  static final String EARPIECE_EXTRA  = "AudioPlayerService_earpiece_extra";
 
-  private final     LocalBinder          binder = new LocalBinder();
+  private final     LocalBinder          binder               = new LocalBinder();
   private final     ProgressEventHandler progressEventHandler = new ProgressEventHandler(this);
+  private final     Handler              stopTimerHandler     = new Handler();
+  private final     Runnable             stopSelfRunnable     = new Runnable() {
+    @Override public void run() {
+      Log.d(TAG, "stopping");
+      stopSelf();
+    }
+  };
+
   private @Nullable SimpleExoPlayer      mediaPlayer;
 
   private           Uri                  mediaUri;
@@ -53,7 +62,14 @@ public class AudioPlayerService extends Service {
     public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
       Log.d(TAG, "onPlayerStateChanged(" + playWhenReady + ", " + playbackState + ")");
       switch (playbackState) {
+        case Player.STATE_IDLE:
+          startStopTimer();
+          break;
+        case Player.STATE_BUFFERING:
+          stopStopTimer();
+          break;
         case Player.STATE_READY:
+          stopStopTimer();
           Log.i(TAG, "onPrepared() " + mediaPlayer.getBufferedPercentage() + "% buffered");
           synchronized (AudioPlayerService.this) {
             if (mediaPlayer == null) return;
@@ -77,6 +93,7 @@ public class AudioPlayerService extends Service {
           break;
 
         case Player.STATE_ENDED:
+          startStopTimer();
           Log.i(TAG, "onComplete");
           synchronized (AudioPlayerService.this) {
 
@@ -130,26 +147,24 @@ public class AudioPlayerService extends Service {
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
+    mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
+    progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
+    earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
+    Log.d(TAG, "onStartCommand" + mediaUri.toString());
     startForeground(FOREGROUND_ID, createNotification());
+    play();
     return Service.START_STICKY;
   }
 
   @Nullable
   @Override
   public IBinder onBind(Intent intent) {
-    mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
-    progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
-    earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
-    play();
     return binder;
   }
 
   @Override
   public boolean onUnbind(Intent intent) {
-    stop();
-    mediaUri = null;
-    progress = 0;
-    earpiece = false;
+    // Clients can rebind to this service
     return true;
   }
 
@@ -161,6 +176,16 @@ public class AudioPlayerService extends Service {
     builder.setWhen(0);
     builder.setSmallIcon(R.drawable.ic_signal_grey_24dp);
     return builder.build();
+  }
+
+  private void startStopTimer() {
+    Log.d(TAG, "start stop timer");
+    stopTimerHandler.postDelayed(stopSelfRunnable, IDLE_STOP_MS);
+  }
+
+  private void stopStopTimer() {
+    Log.d(TAG, "stop stop timer");
+    stopTimerHandler.removeCallbacks(stopSelfRunnable);
   }
 
   private void play() {
@@ -191,6 +216,10 @@ public class AudioPlayerService extends Service {
   }
 
   private void stop() {
+    mediaUri = null;
+    progress = 0;
+    earpiece = false;
+
     if (mediaPlayer == null) return;
     mediaPlayer.stop();
     mediaPlayer.release();
@@ -213,6 +242,11 @@ public class AudioPlayerService extends Service {
 
     public AudioPlayerService getService() {
       return AudioPlayerService.this;
+    }
+
+    public void stop() {
+      AudioPlayerService.this.stop();
+      notifyOnStop();
     }
 
     private void notifyOnStart() {
