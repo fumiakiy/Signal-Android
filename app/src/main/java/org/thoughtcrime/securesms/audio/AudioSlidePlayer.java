@@ -82,7 +82,10 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
       }
 
       @Override public void onServiceDisconnected(ComponentName componentName) {
+        // Service was killed. Notify the view.
         binder = null;
+        removePlaying(AudioSlidePlayer.this);
+        notifyOnStop();
       }
     };
   }
@@ -91,6 +94,7 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
     serviceIntent.putExtra(AudioPlayerService.MEDIA_URI_EXTRA, slide.getUri());
     serviceIntent.putExtra(AudioPlayerService.PROGRESS_EXTRA, progress);
     serviceIntent.putExtra(AudioPlayerService.EARPIECE_EXTRA, earpiece);
+    serviceIntent.putExtra(AudioPlayerService.COMMAND_EXTRA, AudioPlayerService.Command.PLAY);
     Log.d(TAG, slide.getUri().toString());
     context.startService(serviceIntent);
     bindService();

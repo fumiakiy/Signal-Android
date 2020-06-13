@@ -1,6 +1,7 @@
 package org.thoughtcrime.securesms.service;
 
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.net.Uri;
@@ -12,6 +13,7 @@ import android.util.Pair;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlaybackException;
@@ -38,6 +40,11 @@ public class AudioPlayerService extends Service {
   public  static final String MEDIA_URI_EXTRA = "AudioPlayerService_media_uri_extra";
   public  static final String PROGRESS_EXTRA  = "AudioPlayerService_progress_extra";
   public  static final String EARPIECE_EXTRA  = "AudioPlayerService_earpiece_extra";
+  public  static final String COMMAND_EXTRA   = "AudioPlayerService_command_extra";
+
+  public enum Command {
+    UNKNOWN, PLAY, PAUSE, RESUME, CLOSE
+  }
 
   private final     LocalBinder          binder               = new LocalBinder();
   private final     ProgressEventHandler progressEventHandler = new ProgressEventHandler(this);
@@ -108,6 +115,7 @@ public class AudioPlayerService extends Service {
 
           binder.notifyOnStop();
           progressEventHandler.removeMessages(0);
+          NotificationManagerCompat.from(AudioPlayerService.this).notify(FOREGROUND_ID, createNotification(Command.CLOSE));
       }
     }
 
@@ -147,12 +155,32 @@ public class AudioPlayerService extends Service {
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
-    mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
-    progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
-    earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
-    Log.d(TAG, "onStartCommand" + mediaUri.toString());
-    startForeground(FOREGROUND_ID, createNotification());
-    play();
+    Command command = (Command) intent.getSerializableExtra(COMMAND_EXTRA);
+    switch (command) {
+      case PLAY:
+        mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
+        progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
+        earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
+        Log.d(TAG, "onStartCommand" + mediaUri.toString());
+        startForeground(FOREGROUND_ID, createNotification(command));
+        play();
+        break;
+      case PAUSE:
+        pause();
+        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
+        break;
+      case RESUME:
+        play();
+        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
+        break;
+      case CLOSE:
+        stop();
+        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
+        stopSelf();
+        break;
+      default:
+        break;
+    }
     return Service.START_STICKY;
   }
 
@@ -164,18 +192,51 @@ public class AudioPlayerService extends Service {
 
   @Override
   public boolean onUnbind(Intent intent) {
-    // Clients can rebind to this service
+    // returns true because clients can rebind to this service
     return true;
   }
 
-  private Notification createNotification() {
+  private Notification createNotification(Command command) {
     NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), NotificationChannels.OTHER);
-    builder.setContentTitle(getApplicationContext().getString(R.string.AudioPlayerService_notification_title));
-    builder.setContentText(getApplicationContext().getString(R.string.AudioPlayerService_notification_message));
     builder.setPriority(NotificationCompat.PRIORITY_MIN);
     builder.setWhen(0);
     builder.setSmallIcon(R.drawable.ic_signal_grey_24dp);
+
+    addActionsTo(builder, command);
+
     return builder.build();
+  }
+
+  private void addActionsTo(NotificationCompat.Builder builder, Command command) {
+    Intent closeIntent = new Intent(this, AudioPlayerService.class);
+    closeIntent.putExtra(COMMAND_EXTRA, Command.CLOSE);
+    PendingIntent piClose = PendingIntent.getService(this, Command.CLOSE.ordinal(), closeIntent, 0);
+    switch (command) {
+      case PLAY:
+      case RESUME:
+        builder.setContentTitle(getApplicationContext().getString(R.string.AudioPlayerService_notification_title));
+        builder.setContentText(getApplicationContext().getString(R.string.AudioPlayerService_notification_message));
+        Intent pauseIntent = new Intent(this, AudioPlayerService.class);
+        pauseIntent.putExtra(COMMAND_EXTRA, Command.PAUSE);
+        PendingIntent piPause = PendingIntent.getService(this, Command.PAUSE.ordinal(), pauseIntent, 0);
+        builder.addAction(0, getApplicationContext().getString(R.string.AudioPlayerService_action_pause), piPause);
+        builder.addAction(0, getApplicationContext().getString(R.string.AudioPlayerService_action_close), piClose);
+        break;
+      case PAUSE:
+        builder.setContentTitle(getApplicationContext().getString(R.string.AudioPlayerService_notification_title));
+        builder.setContentText(getApplicationContext().getString(R.string.AudioPlayerService_notification_message));
+        Intent resumeIntent = new Intent(this, AudioPlayerService.class);
+        resumeIntent.putExtra(COMMAND_EXTRA, Command.RESUME);
+        PendingIntent piResume = PendingIntent.getService(this, Command.RESUME.ordinal(), resumeIntent, 0);
+        builder.addAction(0, getApplicationContext().getString(R.string.AudioPlayerService_action_resume), piResume);
+        builder.addAction(0, getApplicationContext().getString(R.string.AudioPlayerService_action_close), piClose);
+        break;
+      case CLOSE:
+        builder.setContentTitle(getApplicationContext().getString(R.string.AudioPlayerService_notification_title_finished));
+        builder.setContentText(getApplicationContext().getString(R.string.AudioPlayerService_notification_message_finished));
+      default:
+        break;
+    }
   }
 
   private void startStopTimer() {
@@ -215,15 +276,20 @@ public class AudioPlayerService extends Service {
         .build());
   }
 
-  private void stop() {
-    mediaUri = null;
-    progress = 0;
-    earpiece = false;
-
+  private void pause() {
     if (mediaPlayer == null) return;
+    progress = getProgress().first;
     mediaPlayer.stop();
     mediaPlayer.release();
     mediaPlayer = null;
+    binder.notifyOnStop();
+  }
+
+  private void stop() {
+    pause();
+    mediaUri = null;
+    progress = 0;
+    earpiece = false;
 
 //    sensorManager.unregisterListener(AudioPlayerService.this);
   }
@@ -246,7 +312,6 @@ public class AudioPlayerService extends Service {
 
     public void stop() {
       AudioPlayerService.this.stop();
-      notifyOnStop();
     }
 
     private void notifyOnStart() {
