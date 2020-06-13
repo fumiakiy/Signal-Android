@@ -185,7 +185,7 @@ public final class MediaOverviewPageFragment extends Fragment
     super.onPause();
     int childCount = recyclerView.getChildCount();
     for (int i = 0; i < childCount; i++) {
-      adapter.pause(recyclerView.getChildViewHolder(recyclerView.getChildAt(i)));
+      adapter.  pause(recyclerView.getChildViewHolder(recyclerView.getChildAt(i)));
     }
   }
 

@@ -167,16 +167,12 @@ public class AudioPlayerService extends Service {
         break;
       case PAUSE:
         pause();
-        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
         break;
       case RESUME:
-        play();
-        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
+        resume();
         break;
       case CLOSE:
-        stop();
-        NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(command));
-        stopSelf();
+        stopService();
         break;
       default:
         break;
@@ -276,6 +272,11 @@ public class AudioPlayerService extends Service {
         .build());
   }
 
+  private void resume() {
+    play();
+    NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(Command.RESUME));
+  }
+
   private void pause() {
     if (mediaPlayer == null) return;
     progress = getProgress().first;
@@ -283,15 +284,18 @@ public class AudioPlayerService extends Service {
     mediaPlayer.release();
     mediaPlayer = null;
     binder.notifyOnStop();
+    NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(Command.PAUSE));
   }
 
-  private void stop() {
+  private void stopService() {
     pause();
     mediaUri = null;
     progress = 0;
     earpiece = false;
+    NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(Command.CLOSE));
 
 //    sensorManager.unregisterListener(AudioPlayerService.this);
+    stopSelf();
   }
 
   private Pair<Double, Integer> getProgress() {
@@ -311,7 +315,7 @@ public class AudioPlayerService extends Service {
     }
 
     public void stop() {
-      AudioPlayerService.this.stop();
+      AudioPlayerService.this.pause();
     }
 
     private void notifyOnStart() {
