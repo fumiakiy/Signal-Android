@@ -12,17 +12,20 @@ import android.widget.Toast;
 
 import com.google.android.exoplayer2.ExoPlaybackException;
 
-import java.io.IOException;
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.logging.Log;
 import org.thoughtcrime.securesms.mms.AudioSlide;
 import org.thoughtcrime.securesms.service.AudioPlayerService;
+import org.thoughtcrime.securesms.service.AudioPlayerServiceBackend;
+import org.thoughtcrime.securesms.service.AudioPlayerServiceBackend.AudioStateListener;
+import org.thoughtcrime.securesms.service.AudioPlayerServiceBackend.LocalBinder;
 import org.thoughtcrime.securesms.util.Util;
 import org.whispersystems.libsignal.util.guava.Optional;
 
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 
-public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
+public class AudioSlidePlayer implements AudioStateListener {
 
   private static final String TAG = AudioSlidePlayer.class.getSimpleName();
 
@@ -33,8 +36,8 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
   private final @NonNull  Intent            serviceIntent;
   private final @NonNull  ServiceConnection serviceConnection;
 
-  private @NonNull  WeakReference<Listener>        listener;
-  private @Nullable AudioPlayerService.LocalBinder binder;
+  private @NonNull  WeakReference<Listener> listener;
+  private @Nullable LocalBinder             binder;
 
   public synchronized static AudioSlidePlayer createFor(@NonNull Context context,
                                                         @NonNull AudioSlide slide,
@@ -59,7 +62,7 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
     this.serviceIntent     = new Intent(context, AudioPlayerService.class);
     this.serviceConnection = new ServiceConnection() {
       @Override public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
-        binder = (AudioPlayerService.LocalBinder) iBinder;
+        binder = (LocalBinder) iBinder;
         binder.setListener(AudioSlidePlayer.this);
       }
 
@@ -73,9 +76,9 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
   }
 
   private void startService(final Uri uri, final double progress) {
-    serviceIntent.putExtra(AudioPlayerService.MEDIA_URI_EXTRA, uri);
-    serviceIntent.putExtra(AudioPlayerService.PROGRESS_EXTRA, progress);
-    serviceIntent.putExtra(AudioPlayerService.COMMAND_EXTRA, AudioPlayerService.Command.PLAY);
+    serviceIntent.putExtra(AudioPlayerServiceBackend.MEDIA_URI_EXTRA, uri);
+    serviceIntent.putExtra(AudioPlayerServiceBackend.PROGRESS_EXTRA, progress);
+    serviceIntent.putExtra(AudioPlayerServiceBackend.COMMAND_EXTRA, AudioPlayerServiceBackend.Command.PLAY);
     context.startService(serviceIntent);
     bindService();
   }
