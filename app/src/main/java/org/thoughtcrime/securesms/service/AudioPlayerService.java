@@ -3,17 +3,27 @@ package org.thoughtcrime.securesms.service;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
+import android.os.PowerManager;
+import android.os.PowerManager.WakeLock;
 import android.util.Pair;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlaybackException;
@@ -27,10 +37,13 @@ import com.google.android.exoplayer2.extractor.ExtractorsFactory;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
+
 import java.lang.ref.WeakReference;
+
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.logging.Log;
 import org.thoughtcrime.securesms.notifications.NotificationChannels;
+import org.thoughtcrime.securesms.util.ServiceUtil;
 import org.thoughtcrime.securesms.video.exo.AttachmentDataSourceFactory;
 
 public class AudioPlayerService extends Service {
@@ -39,7 +52,6 @@ public class AudioPlayerService extends Service {
   private static final int    IDLE_STOP_MS    = 60 * 1000;
   public  static final String MEDIA_URI_EXTRA = "AudioPlayerService_media_uri_extra";
   public  static final String PROGRESS_EXTRA  = "AudioPlayerService_progress_extra";
-  public  static final String EARPIECE_EXTRA  = "AudioPlayerService_earpiece_extra";
   public  static final String COMMAND_EXTRA   = "AudioPlayerService_command_extra";
 
   public enum Command {
@@ -56,15 +68,56 @@ public class AudioPlayerService extends Service {
     }
   };
 
+  private           AudioManager         audioManager;
+  private           SensorManager        sensorManager;
+  private           Sensor               proximitySensor;
+  private @Nullable WakeLock             wakeLock;
   private @Nullable SimpleExoPlayer      mediaPlayer;
 
   private           Uri                  mediaUri;
   private           double               progress;
   private           boolean              earpiece;
-  private final     Player.EventListener eventListener = new Player.EventListener() {
+  private           long                 startTime;
 
-    boolean started = false;
+  private final SensorEventListener sensorEventListener = new SensorEventListener() {
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+      if (event.sensor.getType() != Sensor.TYPE_PROXIMITY) return;
+      if (mediaPlayer == null || mediaPlayer.getPlaybackState() != Player.STATE_READY) return;
 
+      int streamType;
+
+      if (event.values[0] < 5f && event.values[0] != proximitySensor.getMaximumRange()) {
+        streamType = AudioManager.STREAM_VOICE_CALL;
+        earpiece = true;
+      } else {
+        streamType = AudioManager.STREAM_MUSIC;
+        earpiece = false;
+      }
+
+      if (streamType == AudioManager.STREAM_VOICE_CALL &&
+          mediaPlayer.getAudioStreamType() != streamType &&
+          !audioManager.isWiredHeadsetOn()) {
+
+        if (wakeLock != null) wakeLock.acquire();
+        pause();
+        resume();
+      } else if (streamType == AudioManager.STREAM_MUSIC &&
+          mediaPlayer.getAudioStreamType() != streamType &&
+          System.currentTimeMillis() - startTime > 500) {
+        if (wakeLock != null) wakeLock.release();
+        pause();
+        resume();
+      }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int i) {
+
+    }
+  };
+
+  private final Player.EventListener playerEventListener = new Player.EventListener() {
     @Override
     public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
       Log.d(TAG, "onPlayerStateChanged(" + playWhenReady + ", " + playbackState + ")");
@@ -81,18 +134,9 @@ public class AudioPlayerService extends Service {
           synchronized (AudioPlayerService.this) {
             if (mediaPlayer == null) return;
 
-            if (started) {
-              Log.d(TAG, "Already started. Ignoring.");
-              return;
-            }
-
-//            started = true;
-
             if (progress > 0) {
               mediaPlayer.seekTo((long) (mediaPlayer.getDuration() * progress));
             }
-
-//              sensorManager.registerListener(AudioPlayerService.this, proximitySensor, SensorManager.SENSOR_DELAY_NORMAL);
           }
 
           binder.notifyOnStart();
@@ -100,22 +144,18 @@ public class AudioPlayerService extends Service {
           break;
 
         case Player.STATE_ENDED:
-          startStopTimer();
           Log.i(TAG, "onComplete");
           synchronized (AudioPlayerService.this) {
-
-//              sensorManager.unregisterListener(AudioPlayerService.this);
-//
-//              if (wakeLock != null && wakeLock.isHeld()) {
-//                if (Build.VERSION.SDK_INT >= 21) {
-//                  wakeLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
-//                }
-//              }
+            if (wakeLock != null && wakeLock.isHeld()) {
+              if (Build.VERSION.SDK_INT >= 21) {
+                wakeLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
+              }
+            }
           }
 
           binder.notifyOnStop();
           progressEventHandler.removeMessages(0);
-          NotificationManagerCompat.from(AudioPlayerService.this).notify(FOREGROUND_ID, createNotification(Command.CLOSE));
+          stopSelf();
       }
     }
 
@@ -123,17 +163,12 @@ public class AudioPlayerService extends Service {
     public void onPlayerError(ExoPlaybackException error) {
       Log.w(TAG, "MediaPlayer Error: " + error);
 
-//      Toast.makeText(context, R.string.AudioSlidePlayer_error_playing_audio, Toast.LENGTH_SHORT).show();
-
       synchronized (AudioPlayerService.this) {
-
-//        sensorManager.unregisterListener(AudioPlayerService.this);
-//
-//        if (wakeLock != null && wakeLock.isHeld()) {
-//          if (Build.VERSION.SDK_INT >= 21) {
-//            wakeLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
-//          }
-//        }
+        if (wakeLock != null && wakeLock.isHeld()) {
+          if (Build.VERSION.SDK_INT >= 21) {
+            wakeLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
+          }
+        }
       }
 
       binder.notifyOnStop();
@@ -143,10 +178,27 @@ public class AudioPlayerService extends Service {
   };
 
   @Override
+  public void onCreate() {
+    super.onCreate();
+    audioManager    = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
+    sensorManager   = (SensorManager)getSystemService(Context.SENSOR_SERVICE);
+    proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+
+    sensorManager.registerListener(sensorEventListener, proximitySensor, SensorManager.SENSOR_DELAY_NORMAL);
+
+    if (Build.VERSION.SDK_INT >= 21) {
+      this.wakeLock = ServiceUtil.getPowerManager(this).newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, TAG);
+    } else {
+      this.wakeLock = null;
+    }
+  }
+
+  @Override
   public void onDestroy() {
     super.onDestroy();
+    sensorManager.unregisterListener(sensorEventListener);
     if (mediaPlayer != null) {
-      mediaPlayer.removeListener(eventListener);
+      mediaPlayer.removeListener(playerEventListener);
       mediaPlayer.stop();
       mediaPlayer.release();
     }
@@ -160,7 +212,6 @@ public class AudioPlayerService extends Service {
       case PLAY:
         mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
         progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
-        earpiece = intent.getBooleanExtra(EARPIECE_EXTRA, false);
         Log.d(TAG, "onStartCommand" + mediaUri.toString());
         startForeground(FOREGROUND_ID, createNotification(command));
         play();
@@ -253,7 +304,7 @@ public class AudioPlayerService extends Service {
         .createDefaultLoadControl();
     mediaPlayer = ExoPlayerFactory
         .newSimpleInstance(this, new DefaultTrackSelector(), loadControl);
-    mediaPlayer.addListener(eventListener);
+    mediaPlayer.addListener(playerEventListener);
 
     DefaultDataSourceFactory defaultDataSourceFactory =
         new DefaultDataSourceFactory(this, "GenericUserAgent", null);
@@ -270,6 +321,7 @@ public class AudioPlayerService extends Service {
         .setContentType(earpiece ? C.CONTENT_TYPE_SPEECH : C.CONTENT_TYPE_MUSIC)
         .setUsage(earpiece ? C.USAGE_VOICE_COMMUNICATION : C.USAGE_MEDIA)
         .build());
+    startTime = System.currentTimeMillis();
   }
 
   private void resume() {
@@ -292,9 +344,6 @@ public class AudioPlayerService extends Service {
     mediaUri = null;
     progress = 0;
     earpiece = false;
-    NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(Command.CLOSE));
-
-//    sensorManager.unregisterListener(AudioPlayerService.this);
     stopSelf();
   }
 

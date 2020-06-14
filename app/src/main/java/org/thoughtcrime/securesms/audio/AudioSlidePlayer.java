@@ -4,27 +4,22 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.hardware.Sensor;
-import android.hardware.SensorManager;
-import android.media.AudioManager;
-import android.os.Build;
+import android.net.Uri;
 import android.os.IBinder;
-import android.os.PowerManager;
-import android.os.PowerManager.WakeLock;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import android.widget.Toast;
 
 import com.google.android.exoplayer2.ExoPlaybackException;
+
+import java.io.IOException;
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.logging.Log;
 import org.thoughtcrime.securesms.mms.AudioSlide;
 import org.thoughtcrime.securesms.service.AudioPlayerService;
-import org.thoughtcrime.securesms.util.ServiceUtil;
 import org.thoughtcrime.securesms.util.Util;
 import org.whispersystems.libsignal.util.guava.Optional;
 
-import java.io.IOException;
 import java.lang.ref.WeakReference;
 
 public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
@@ -35,10 +30,6 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
 
   private final @NonNull  Context           context;
   private final @NonNull  AudioSlide        slide;
-  private final @NonNull  AudioManager      audioManager;
-  private final @NonNull  SensorManager     sensorManager;
-  private final @NonNull  Sensor            proximitySensor;
-  private final @Nullable WakeLock          wakeLock;
   private final @NonNull  Intent            serviceIntent;
   private final @NonNull  ServiceConnection serviceConnection;
 
@@ -64,15 +55,6 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
     this.context              = context;
     this.slide                = slide;
     this.listener             = new WeakReference<>(listener);
-    this.audioManager         = (AudioManager)context.getSystemService(Context.AUDIO_SERVICE);
-    this.sensorManager        = (SensorManager)context.getSystemService(Context.SENSOR_SERVICE);
-    this.proximitySensor      = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
-
-    if (Build.VERSION.SDK_INT >= 21) {
-      this.wakeLock = ServiceUtil.getPowerManager(context).newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, TAG);
-    } else {
-      this.wakeLock = null;
-    }
 
     this.serviceIntent     = new Intent(context, AudioPlayerService.class);
     this.serviceConnection = new ServiceConnection() {
@@ -90,12 +72,10 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
     };
   }
 
-  private void startService(final double progress, final boolean earpiece) {
-    serviceIntent.putExtra(AudioPlayerService.MEDIA_URI_EXTRA, slide.getUri());
+  private void startService(final Uri uri, final double progress) {
+    serviceIntent.putExtra(AudioPlayerService.MEDIA_URI_EXTRA, uri);
     serviceIntent.putExtra(AudioPlayerService.PROGRESS_EXTRA, progress);
-    serviceIntent.putExtra(AudioPlayerService.EARPIECE_EXTRA, earpiece);
     serviceIntent.putExtra(AudioPlayerService.COMMAND_EXTRA, AudioPlayerService.Command.PLAY);
-    Log.d(TAG, slide.getUri().toString());
     context.startService(serviceIntent);
     bindService();
   }
@@ -112,12 +92,13 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
   }
 
   public void play(final double progress) throws IOException {
-    play(progress, false);
-  }
+    Uri uri = slide.getUri();
+    if (slide.getUri() == null) {
+      throw new IOException("Slide has no URI!");
+    }
 
-  private void play(final double progress, boolean earpiece) {
-    setPlaying(AudioSlidePlayer.this);
-    startService(progress, earpiece);
+    setPlaying(this);
+    startService(uri, progress);
   }
 
   public synchronized void stop() {
@@ -229,49 +210,6 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
       playing = Optional.absent();
     }
   }
-//
-//  @Override
-//  public void onSensorChanged(SensorEvent event) {
-//    if (event.sensor.getType() != Sensor.TYPE_PROXIMITY) return;
-//    if (mediaPlayer == null || mediaPlayer.getPlaybackState() != Player.STATE_READY) return;
-//
-//    int streamType;
-//
-//    if (event.values[0] < 5f && event.values[0] != proximitySensor.getMaximumRange()) {
-//      streamType = AudioManager.STREAM_VOICE_CALL;
-//    } else {
-//      streamType = AudioManager.STREAM_MUSIC;
-//    }
-//
-//    if (streamType == AudioManager.STREAM_VOICE_CALL &&
-//        mediaPlayer.getAudioStreamType() != streamType &&
-//        !audioManager.isWiredHeadsetOn())
-//    {
-//      double position = mediaPlayer.getCurrentPosition();
-//      double duration = mediaPlayer.getDuration();
-//      double progress = position / duration;
-//
-//      if (wakeLock != null) wakeLock.acquire();
-//      stop();
-//      try {
-//        play(progress, true);
-//      } catch (IOException e) {
-//        Log.w(TAG, e);
-//      }
-//    } else if (streamType == AudioManager.STREAM_MUSIC &&
-//               mediaPlayer.getAudioStreamType() != streamType &&
-//               System.currentTimeMillis() - startTime > 500)
-//    {
-//      if (wakeLock != null) wakeLock.release();
-//      stop();
-//      notifyOnStop();
-//    }
-//  }
-//
-//  @Override
-//  public void onAccuracyChanged(Sensor sensor, int accuracy) {
-//
-//  }
 
   public interface Listener {
     void onStart();
