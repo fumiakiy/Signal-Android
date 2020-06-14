@@ -145,10 +145,6 @@ public class AudioSlidePlayer implements AudioPlayerService.AudioStateListener {
 
   public void setListener(@NonNull Listener listener) {
     this.listener = new WeakReference<>(listener);
-
-//    if (this.mediaPlayer != null && this.mediaPlayer.getPlaybackState() == Player.STATE_READY) {
-//      notifyOnStart();
-//    }
   }
 
   public @NonNull AudioSlide getAudioSlide() {
