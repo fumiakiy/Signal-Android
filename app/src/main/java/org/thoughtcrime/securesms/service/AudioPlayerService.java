@@ -63,7 +63,6 @@ public class AudioPlayerService extends Service {
   private final     Handler              stopTimerHandler     = new Handler();
   private final     Runnable             stopSelfRunnable     = new Runnable() {
     @Override public void run() {
-      Log.d(TAG, "stopping");
       stopSelf();
     }
   };
@@ -100,14 +99,12 @@ public class AudioPlayerService extends Service {
           !audioManager.isWiredHeadsetOn()) {
 
         if (wakeLock != null) wakeLock.acquire();
-        pause();
-        resume();
+        changeStreamType();
       } else if (streamType == AudioManager.STREAM_MUSIC &&
           mediaPlayer.getAudioStreamType() != streamType &&
           System.currentTimeMillis() - startTime > 500) {
         if (wakeLock != null) wakeLock.release();
-        pause();
-        resume();
+        changeStreamType();
       }
     }
 
@@ -212,7 +209,6 @@ public class AudioPlayerService extends Service {
       case PLAY:
         mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
         progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
-        Log.d(TAG, "onStartCommand" + mediaUri.toString());
         startForeground(FOREGROUND_ID, createNotification(command));
         play();
         break;
@@ -287,12 +283,10 @@ public class AudioPlayerService extends Service {
   }
 
   private void startStopTimer() {
-    Log.d(TAG, "start stop timer");
     stopTimerHandler.postDelayed(stopSelfRunnable, IDLE_STOP_MS);
   }
 
   private void stopStopTimer() {
-    Log.d(TAG, "stop stop timer");
     stopTimerHandler.removeCallbacks(stopSelfRunnable);
   }
 
@@ -337,6 +331,15 @@ public class AudioPlayerService extends Service {
     mediaPlayer = null;
     binder.notifyOnStop();
     NotificationManagerCompat.from(this).notify(FOREGROUND_ID, createNotification(Command.PAUSE));
+  }
+
+  /** Call when the mediaPlayer must change the stream type i.e. where to output audio. */
+  private void changeStreamType() {
+    if (mediaPlayer == null) return;
+    progress = getProgress().first;
+    mediaPlayer.stop();
+    mediaPlayer.release();
+    play();
   }
 
   private void stopService() {
