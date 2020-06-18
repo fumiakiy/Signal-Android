@@ -34,24 +34,40 @@ interface MediaPlayer {
   void stop();
 }
 
-/** An interface that defines how to create a MediaPlayer instance. */
+/**
+ * An interface that defines how to create a MediaPlayer instance.
+ * The primary purpose of this interface is to allow a dependency (ExoPlayerFactory)
+ * be injected at runtime so it can make testing easier.
+ */
 interface MediaPlayerFactory {
   MediaPlayer create(Uri uri, Player.EventListener listener, boolean earpiece);
 }
 
-/** An interface that defines how the service interacts with a proximity sensor. */
+/**
+ * An interface that defines how the service interacts with a proximity sensor.
+ * The primary purpose of this interface is to allow a dependency (Sensor)
+ * be injected at runtime so it can make testing easier.
+ */
 interface ProximitySensor {
   float getMaximumRange();
   void registerListener(SensorEventListener listener, int samplingPeriodUs);
   void unregisterListener(SensorEventListener listener);
 }
 
-/** An interface that defines how the service interacts with the audio manager. */
+/**
+ * An interface that defines how the service interacts with the audio manager.
+ * The primary purpose of this interface is to allow a dependency (AudioManager)
+ * be injected at runtime so it can make testing easier.
+ */
 interface AudioManager {
   boolean isWiredHeadsetOn();
 }
 
-/** An interface that makes it easy to mock WakeLock object. */
+/**
+ * An interface that makes it easy to mock WakeLock object.
+ * The primary purpose of this interface is to allow a dependency (WakeLock)
+ * be injected at runtime so it can make testing easier.
+ */
 interface WakeLock {
   void acquire();
   void release();
@@ -62,6 +78,8 @@ interface WakeLock {
 /**
  * An interface that defines how the real world android.app.Service is called back from
  * the AudioPlayerServiceBackend object.
+ * The primary purpose of this interface is to allow a dependency (Service)
+ * be injected at runtime so it can make testing easier.
  */
 interface ServiceInterface {
   void startForeground(AudioPlayerServiceBackend.Command command);
@@ -93,19 +111,15 @@ public class AudioPlayerServiceBackend {
 
   private @Nullable final WakeLock wakeLock;
 
-  private boolean earpiece;
-  private MediaPlayer mediaPlayer;
-  private Uri mediaUri;
-  private double progress;
-  private long startTime;
+  private boolean               earpiece;
+  private @Nullable MediaPlayer mediaPlayer;
+  private @Nullable Uri         mediaUri;
+  private double                progress;
+  private long                  startTime;
 
-  /** Call from the service's onCreate(). */
-  AudioPlayerServiceBackend(
-      AudioManager audioManager,
-      MediaPlayerFactory mediaPlayerFactory,
-      ProximitySensor proximitySensor,
-      ServiceInterface serviceInterface,
-      @Nullable WakeLock wakeLock) {
+  /** Constructor. Call from the service's onCreate(). */
+  AudioPlayerServiceBackend(AudioManager audioManager, MediaPlayerFactory mediaPlayerFactory,
+      ProximitySensor proximitySensor, ServiceInterface serviceInterface, @Nullable WakeLock wakeLock) {
     this.audioManager = audioManager;
     this.mediaPlayerFactory = mediaPlayerFactory;
     this.proximitySensor = proximitySensor;
@@ -116,38 +130,13 @@ public class AudioPlayerServiceBackend {
   }
 
   /** Call from the service's onDestroy() */
-  void cleanUp() {
-    proximitySensor.unregisterListener(sensorEventListener);
-    if (mediaPlayer != null) {
-      mediaPlayer.removeListener(playerEventListener);
-      mediaPlayer.stop();
-      mediaPlayer.release();
-    }
-    mediaPlayer = null;
+  void onDestroy() {
+    cleanUp();
   }
 
   /** Call from the service's onStartCommand. */
   void onStartCommand(Intent intent) {
-    Command command = (Command) intent.getSerializableExtra(COMMAND_EXTRA);
-    switch (command) {
-      case PLAY:
-        mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
-        progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
-        serviceInterface.startForeground(command);
-        play();
-        break;
-      case PAUSE:
-        pause();
-        break;
-      case RESUME:
-        resume();
-        break;
-      case CLOSE:
-        stopService();
-        break;
-      default:
-        break;
-    }
+    handleCommand(intent);
   }
 
   /** Call from the service's onBind. */
@@ -201,6 +190,10 @@ public class AudioPlayerServiceBackend {
     }
   };
 
+  /**
+   * A listener that handles a few interesting events that happens in a media player
+   * during the lifecycle of an audio playback.
+   */
   private final Player.EventListener playerEventListener = new Player.EventListener() {
     @Override
     public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
@@ -257,6 +250,30 @@ public class AudioPlayerServiceBackend {
     }
   };
 
+  /** Call when a "command" is received from outside of the service. */
+  private void handleCommand(Intent intent) {
+    Command command = (Command) intent.getSerializableExtra(COMMAND_EXTRA);
+    switch (command) {
+      case PLAY:
+        mediaUri = intent.getParcelableExtra(MEDIA_URI_EXTRA);
+        progress = intent.getDoubleExtra(PROGRESS_EXTRA, 0);
+        serviceInterface.startForeground(command);
+        play();
+        break;
+      case PAUSE:
+        pause();
+        break;
+      case RESUME:
+        resume();
+        break;
+      case CLOSE:
+        stopService();
+        break;
+      default:
+        break;
+    }
+  }
+
   /** Call to start playback. */
   private void play() {
     if (mediaUri == null) return;
@@ -297,6 +314,17 @@ public class AudioPlayerServiceBackend {
     progress = 0;
     earpiece = false;
     serviceInterface.stop();
+  }
+
+  /** Call when the service is about to be destroyed */
+  private void cleanUp() {
+    proximitySensor.unregisterListener(sensorEventListener);
+    if (mediaPlayer != null) {
+      mediaPlayer.removeListener(playerEventListener);
+      mediaPlayer.stop();
+      mediaPlayer.release();
+    }
+    mediaPlayer = null;
   }
 
   private Pair<Double, Integer> getProgress() {
