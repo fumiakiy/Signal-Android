@@ -124,7 +124,7 @@ public class AudioPlayerServiceBackendTest {
     playerEventListener.onPlayerStateChanged(true, Player.STATE_ENDED);
 
     verify(mockListener).onAudioStopped();
-}
+  }
 
   @Test
   public void externalListenerGetsNotifiedWhenPlaybackFailed() {
@@ -138,6 +138,20 @@ public class AudioPlayerServiceBackendTest {
 
     verify(mockListener).onAudioStopped();
     verify(mockListener).onAudioError(e);
+  }
+
+  @Test
+  public void mediaPlayerStartsAtSpecifiedProgress() {
+    Uri uri = Uri.parse("content://3");
+    double progress = 0.45;
+    long duration = 9876L;
+    AudioStateListener mockListener = mock(AudioStateListener.class);
+    setupBound(uri, progress, mockListener);
+    when(mediaPlayer.getDuration()).thenReturn(duration);
+
+    // Simulate player becomes ready
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+    verify(mediaPlayer).seekTo((long) (duration * progress));
   }
 
   private Intent playCommand(Uri uri, double progress) {
