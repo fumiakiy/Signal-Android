@@ -1,12 +1,12 @@
 package org.thoughtcrime.securesms.service;
 
 import static com.ibm.icu.impl.Assert.fail;
+import static org.jsoup.helper.Validate.isTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyBoolean;
 import static org.mockito.Matchers.anyObject;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -20,13 +20,12 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.net.Uri;
 
-import android.service.autofill.FieldClassification.Match;
-import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.audio.AudioAttributes;
+
 import java.io.IOException;
 import java.lang.reflect.Field;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,8 +33,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
-import org.mockito.stubbing.OngoingStubbing;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.thoughtcrime.securesms.service.AudioPlayerServiceBackend.AudioStateListener;
@@ -45,26 +42,27 @@ import org.thoughtcrime.securesms.service.AudioPlayerServiceBackend.Command;
 @Config(manifest = Config.NONE, application = Application.class)
 public class AudioPlayerServiceBackendTest {
   private final FakeProximitySensor proximitySensor = new FakeProximitySensor();
+  private final FakeWakeLock        wakeLock        = new FakeWakeLock();
+  private final FakeClock           clock           = new FakeClock(0L);
 
   private AudioPlayerServiceBackend backend;
-  private Player.EventListener playerEventListener;
+  private Player.EventListener      playerEventListener;
 
   @Mock
-  private AudioManager audioManager;
+  private AudioManager       audioManager;
   @Mock
-  private MediaPlayer mediaPlayer;
+  private MediaPlayer        mediaPlayer;
   @Mock
   private MediaPlayerFactory mediaPlayerFactory;
   @Mock
-  private ServiceInterface serviceInterface;
-  @Mock
-  private WakeLock wakeLock;
+  private ServiceInterface   serviceInterface;
 
   @Before
   public void setup() {
     MockitoAnnotations.initMocks(this);
     when(mediaPlayerFactory.create(anyObject(), anyObject(), anyBoolean())).thenReturn(mediaPlayer);
-    backend = new AudioPlayerServiceBackend(audioManager, mediaPlayerFactory, proximitySensor, serviceInterface, wakeLock);
+    backend = new AudioPlayerServiceBackend(audioManager, clock, mediaPlayerFactory, proximitySensor, serviceInterface,
+        wakeLock);
   }
 
   private AudioPlayerServiceBackend.LocalBinder setupBound(Uri uri, double progress, AudioStateListener listener) {
@@ -362,6 +360,84 @@ public class AudioPlayerServiceBackendTest {
   }
 
   @Test
+  public void whenProximityUpdatesAcquiresWakeLock() {
+    Uri uri = Uri.parse("content://4");
+    AudioStateListener mockListener = mock(AudioStateListener.class);
+    setupBound(uri, 0, mockListener);
+
+    // Simulate playback starts
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+    when(mediaPlayer.getPlaybackState()).thenReturn(Player.STATE_READY);
+    when(mediaPlayer.getAudioStreamType()).thenReturn(android.media.AudioManager.STREAM_MUSIC);
+
+    // Simulate proximity update
+    proximitySensor.listener.onSensorChanged(mockSensorEvent(2f));
+
+    isTrue(wakeLock.isAcquireCalled);
+  }
+
+  @Test
+  public void whenProximityUpdatesAgainReleasesWakeLock() {
+    Uri uri = Uri.parse("content://4");
+    AudioStateListener mockListener = mock(AudioStateListener.class);
+    setupBound(uri, 0, mockListener);
+
+    // Simulate playback starts
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+    when(mediaPlayer.getPlaybackState()).thenReturn(Player.STATE_READY);
+    when(mediaPlayer.getAudioStreamType()).thenReturn(android.media.AudioManager.STREAM_MUSIC);
+
+    // Simulate proximity update
+    proximitySensor.listener.onSensorChanged(mockSensorEvent(2f));
+
+    // Simulate playback starts again
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+    when(mediaPlayer.getAudioStreamType()).thenReturn(android.media.AudioManager.STREAM_VOICE_CALL);
+
+    clock.progress(10000L);
+    // Simulate proximity update again
+    proximitySensor.listener.onSensorChanged(mockSensorEvent(200f));
+    // Simulate playback starts yet again
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+
+    isTrue(wakeLock.isReleaseCalled);
+  }
+
+  @Test
+  public void wakeLockIsSetToReleaseWhenPlaybackReachesAtEnd() {
+    Uri uri = Uri.parse("content://2");
+    AudioStateListener mockListener = mock(AudioStateListener.class);
+    setupBound(uri, 0, mockListener);
+
+    // Simulate playback starts
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_READY);
+    clock.progress(10000L);
+    // Simulate acquired WakeLock
+    wakeLock.acquire();
+    // Simulate playback ends
+    playerEventListener.onPlayerStateChanged(true, Player.STATE_ENDED);
+
+    isTrue(wakeLock.isReleaseWaitForNoProximityCalled);
+  }
+
+  @Test
+  public void wakeLockIsSetToReleaseWhenPlaybackFails() {
+    Uri uri = Uri.parse("content://2");
+    AudioStateListener mockListener = mock(AudioStateListener.class);
+    setupBound(uri, 0, mockListener);
+
+    // Simulate acquired WakeLock
+    wakeLock.acquire();
+
+    clock.progress(10000L);
+    // Simulate playback error
+    ExoPlaybackException e = ExoPlaybackException.createForSource(new IOException());
+    playerEventListener.onPlayerError(e);
+
+    isTrue(wakeLock.isReleaseWaitForNoProximityCalled);
+  }
+
+  @Test
   public void closingNotificationStopService() {
     Uri uri = Uri.parse("content://5");
     AudioStateListener mockListener = mock(AudioStateListener.class);
@@ -447,5 +523,52 @@ public class AudioPlayerServiceBackendTest {
     }
   }
 
+  private static class FakeWakeLock implements WakeLock {
+    private boolean held;
+
+    boolean isAcquireCalled;
+    boolean isReleaseCalled;
+    boolean isReleaseWaitForNoProximityCalled;
+
+    @Override
+    public void acquire() {
+      held = true;
+      isAcquireCalled = true;
+    }
+
+    @Override
+    public void release() {
+      held = false;
+      isReleaseCalled = true;
+    }
+
+    @Override
+    public void releaseWaitForNoProximity() {
+      held = false;
+      isReleaseWaitForNoProximityCalled = true;
+    }
+
+    @Override
+    public boolean isHeld() {
+      return held;
+    }
+  }
+
+  private static class FakeClock implements Clock {
+    private long currentTimeMillis;
+
+    FakeClock(long currentTimeMillis) {
+      this.currentTimeMillis = currentTimeMillis;
+    }
+
+    @Override
+    public long currentTimeMillis() {
+      return currentTimeMillis;
+    }
+
+    public void progress(long millis) {
+      currentTimeMillis += millis;
+    }
+  }
 }
 

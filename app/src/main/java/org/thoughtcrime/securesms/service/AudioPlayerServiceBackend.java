@@ -89,6 +89,10 @@ interface ServiceInterface {
   void stop();
 }
 
+interface Clock {
+  long currentTimeMillis();
+}
+
 /**
  * Testable backend of an android.app.Service that plays back an audio in the foreground service.
  */
@@ -103,6 +107,7 @@ public class AudioPlayerServiceBackend {
   }
 
   private final AudioManager         audioManager;
+  private final Clock                clock;
   private final ServiceInterface     serviceInterface;
   private final LocalBinder          binder = new LocalBinder();
   private final MediaPlayerFactory   mediaPlayerFactory;
@@ -118,13 +123,14 @@ public class AudioPlayerServiceBackend {
   private long                  startTime;
 
   /** Constructor. Call from the service's onCreate(). */
-  AudioPlayerServiceBackend(AudioManager audioManager, MediaPlayerFactory mediaPlayerFactory,
+  AudioPlayerServiceBackend(AudioManager audioManager, Clock clock, MediaPlayerFactory mediaPlayerFactory,
       ProximitySensor proximitySensor, ServiceInterface serviceInterface, @Nullable WakeLock wakeLock) {
-    this.audioManager = audioManager;
+    this.audioManager       = audioManager;
+    this.clock              = clock;
     this.mediaPlayerFactory = mediaPlayerFactory;
-    this.proximitySensor = proximitySensor;
-    this.serviceInterface = serviceInterface;
-    this.wakeLock = wakeLock;
+    this.proximitySensor    = proximitySensor;
+    this.serviceInterface   = serviceInterface;
+    this.wakeLock           = wakeLock;
 
     proximitySensor.registerListener(sensorEventListener, android.hardware.SensorManager.SENSOR_DELAY_NORMAL);
   }
@@ -178,7 +184,7 @@ public class AudioPlayerServiceBackend {
         changeStreamType();
       } else if (streamType == android.media.AudioManager.STREAM_MUSIC &&
           mediaPlayer.getAudioStreamType() != streamType &&
-          System.currentTimeMillis() - startTime > 500) {
+          clock.currentTimeMillis() - startTime > 500) {
         if (wakeLock != null) wakeLock.release();
         changeStreamType();
       }
@@ -278,7 +284,7 @@ public class AudioPlayerServiceBackend {
   private void play() {
     if (mediaUri == null) return;
     mediaPlayer = mediaPlayerFactory.create(mediaUri, playerEventListener, earpiece);
-    startTime = System.currentTimeMillis();
+    startTime = clock.currentTimeMillis();
   }
 
   /** Call after the playback is paused. */

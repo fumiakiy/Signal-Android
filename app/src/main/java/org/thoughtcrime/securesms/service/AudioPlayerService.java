@@ -59,6 +59,7 @@ public class AudioPlayerService extends Service {
 
     backend = new AudioPlayerServiceBackend(
         new RealAudioManager(audioManager),
+        new RealClock(),
         new RealMediaPlayerFactory(this),
         new RealProximitySensor(sensorManager),
         new RealServiceInterface(this),
@@ -339,6 +340,13 @@ public class AudioPlayerService extends Service {
     @Override
     public boolean isHeld() {
       return wakeLock.isHeld();
+    }
+  }
+
+  private static final class RealClock implements Clock {
+
+    @Override public long currentTimeMillis() {
+      return System.currentTimeMillis();
     }
   }
 }
