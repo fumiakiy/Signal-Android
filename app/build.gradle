@@ -77,7 +77,7 @@ android {
     buildToolsVersion BUILD_TOOL_VERSION
     compileSdkVersion COMPILE_SDK
 
-    flavorDimensions 'distribution', 'environment'
+    flavorDimensions 'distribution', 'environment', 'map'
     useLibrary 'org.apache.http.legacy'
 
     dexOptions {
@@ -261,6 +261,15 @@ android {
             buildConfigField "String", "UNIDENTIFIED_SENDER_TRUST_ROOT", "\"BbqY1DzohE4NUZoVF+L18oUPrK3kILllLEJh2UnPSsEx\""
             buildConfigField "String", "ZKGROUP_SERVER_PUBLIC_PARAMS", "\"ABSY21VckQcbSXVNCGRYJcfWHiAMZmpTtTELcDmxgdFbtp/bWsSxZdMKzfCp8rvIs8ocCU3B37fT3r4Mi5qAemeGeR2X+/YmOGR5ofui7tD5mDQfstAI9i+4WpMtIe8KC3wU5w3Inq3uNWVmoGtpKndsNfwJrCg0Hd9zmObhypUnSkfYn2ooMOOnBpfdanRtrvetZUayDMSC5iSRcXKpdls=\""
         }
+
+        gmaps {
+            dimension 'map'
+            isDefault true
+        }
+
+        osm {
+            dimension 'map'
+        }
     }
 
     android.applicationVariants.all { variant ->
@@ -324,7 +333,8 @@ dependencies {
         exclude group: 'com.google.firebase', module: 'firebase-measurement-connector'
     }
 
-    implementation 'com.google.android.gms:play-services-maps:16.1.0'
+    gmapsImplementation 'com.google.android.gms:play-services-maps:16.1.0'
+    osmImplementation 'org.osmdroid:osmdroid-android:6.1.8'
     implementation 'com.google.android.gms:play-services-auth:16.0.1'
 
     implementation 'com.google.android.exoplayer:exoplayer-core:2.9.1'
